@@ -2,7 +2,7 @@ name: Deploy Backend Ventas (8092)
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "deploy" ]
 
 jobs:
   build-and-push:
