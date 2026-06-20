@@ -41,8 +41,7 @@ jobs:
 
       - name: 5. Conectar a Kubernetes (EKS)
         run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          aws eks update-kubeconfig --region us-east-1 --name innovatech-eks --role-arn arn:aws:iam::$ACCOUNT_ID:role/LabRole
+          aws eks update-kubeconfig --region us-east-1 --name innovatech-eks
 
       - name: 6. Desplegar Infraestructura en EKS
         run: |
