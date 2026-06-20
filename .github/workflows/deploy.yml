@@ -1,47 +1,54 @@
-name: Deploy Backend Ventas (8092)
+name: CI/CD Pipeline - Despachos
 
 on:
   push:
-    branches: [ "deploy" ]
+    branches:
+      - deploy # (Cámbialo a 'master' si tu rama principal se llama así)
 
 jobs:
-  build-and-push:
+  build-push-deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: 1. Descargar el código
         uses: actions/checkout@v3
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
+      - name: 2. Configurar Credenciales de AWS
+        uses: aws-actions/configure-aws-credentials@v2
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
 
-      - name: Build and Push Docker Image
-        uses: docker/build-push-action@v4
-        with:
-          # AJUSTADO: Ahora apunta a la carpeta exacta de la captura
-          context: ./Springboot-API-REST
-          push: true
-          # Imagen única para Ventas
-          tags: ${{ secrets.DOCKER_USERNAME }}/innovatech-backend-8092:latest
+      - name: 3. Iniciar sesión en Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
 
-  deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy via SSH Proxy Jump
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.BACKEND_PRIVATE_IP }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          proxy_host: ${{ secrets.FRONTEND_PUBLIC_IP }}
-          proxy_username: ${{ secrets.SSH_USER }}
-          proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            cd ~/innovatech-deployment
-            # Actualizamos solo el servicio de ventas
-            docker compose pull backend-8092
-            docker compose up -d backend-8092
-            docker image prune -f
+      - name: 4. Construir y Subir Imagen Docker a ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: innovatech-backend-ventas
+          IMAGE_TAG: latest
+        run: |
+          # Entramos a la carpeta donde realmente está el Dockerfile
+          cd Springboot-API-REST
+          
+          # Construye la imagen usando tu Dockerfile
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          
+          # Sube la imagen a AWS ECR
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      - name: 5. Conectar a Kubernetes (EKS)
+        run: |
+          aws eks update-kubeconfig --region us-east-1 --name innovatech-eks
+
+      - name: 6. Desplegar Infraestructura en EKS
+        run: |
+          # Esto obliga a Kubernetes a recargar la imagen "latest"
+          kubectl apply -f k8s/innovatech-secret.yaml
+          kubectl apply -f k8s/innovatech-deploy.yaml
+          kubectl apply -f k8s/innovatech-hpa.yaml
+          
+          # Reinicia los contenedores para asegurar que toman el código nuevo
+          kubectl rollout restart deployment ventas-deployment
